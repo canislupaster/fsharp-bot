@@ -95,14 +95,14 @@ type Count =
         ApplicationCommandContext *
         [<SlashCommandParameter(Description = "User to count messages of");
           DefaultParameterValue(null: GuildUser | null);
-          Optional>] user: GuildUser | null ->
-            string
+          Optional>] user: GuildUser | null  ->
+            Task<string>
 
 app
     .AddSlashCommand(
         "count",
         "How many messages until you get your next role?",
-        Count(fun options services context user ->
+        Count(fun options services context user -> task{
             let targetUserResult =
                 match user |> Option.ofObj with
                 | None ->
@@ -111,9 +111,13 @@ app
                     | _ -> Error "Command must be invoked in a guild or with a user."
                 | Some validUser -> Ok(validUser)
 
-            match targetUserResult with
-            | Error errorMessage -> errorMessage
-            | Ok targetUser ->
+            let guildResult = match context.Guild |> Option.ofObj with
+                                | Some x -> Ok x
+                                | None -> Error "Command must be executed in a guild"
+
+            match (targetUserResult, guildResult) with
+            | Error errorMessage, _ | _, Error errorMessage -> return errorMessage
+            | Ok targetUser, Ok targetGuild->
                 use scope = services.CreateScope()
                 let db = scope.ServiceProvider.GetRequiredService<LiteDatabase>()
 
@@ -134,9 +138,12 @@ app
                     |> Option.ofObj
 
                 match role with
-                | None -> $"{targetUser} is at {count} messages now! Has reached the top of the ladder buddy."
+                | None ->
+                    return $"{targetUser} is at {count} messages now! Has reached the top of the ladder buddy."
                 | Some validRole ->
-                    $"{targetUser} is at {count} messages now! Needs {validRole.Threshold - count} more messages to get the role <@&{validRole.Id}>.")
+                    let! role = targetGuild.GetRoleAsync(validRole.Id)
+                    let roleName = role.Name
+                    return $"{targetUser} is at {count} messages now! Needs {validRole.Threshold - count} more messages to get the role **{roleName}**."})
     )
     .UseGatewayHandlers()
 |> ignore
