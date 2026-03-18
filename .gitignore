@@ -62,3 +62,6 @@ nunit-*.xml
 # Appsettings
 appsettings*.json
 !appsettings.example.json
+
+.fake
+**/data

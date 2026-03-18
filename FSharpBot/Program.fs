@@ -22,7 +22,7 @@ open FSharpBot
 let host = Host.CreateApplicationBuilder()
 
 host.Services
-    .AddSingleton<LiteDatabase>(fun _ -> new LiteDatabase("Data.db"))
+    .AddSingleton<LiteDatabase>(fun _ -> new LiteDatabase("data/Data.db"))
     .AddHostedService<ContentPollingService>()
     .AddDiscordGateway(fun options ->
         options.Intents <-
@@ -48,37 +48,37 @@ host.Services
                     use scope = services.CreateScope()
                     let db = scope.ServiceProvider.GetRequiredService<LiteDatabase>()
 
-                    let collection = db.GetCollection<UserMessageCount>("userMessageCounts")
+                    let count =
+                        lock db (fun () ->
+                            let collection = db.GetCollection<UserMessageCount>("userMessageCounts")
 
-                    let userCount = collection.FindOne(Query.EQ("_id", int64 user.Id)) |> Option.ofObj
+                            match collection.FindOne(Query.EQ("_id", int64 user.Id)) |> Option.ofObj with
+                            | None ->
+                                let newUser = { UserId = int64 user.Id; Count = 1 }
+                                collection.Insert(newUser) |> ignore
+                                1
+                            | Some validUserCount ->
+                                validUserCount.Count <- validUserCount.Count + 1
+                                collection.Update(validUserCount) |> ignore
+                                validUserCount.Count)
 
-                    match userCount with
-                    | None ->
-                        let newUser = { UserId = int64 user.Id; Count = 1 }
-                        collection.Insert(newUser) |> ignore
-                        Task.CompletedTask
-                    | Some validUserCount ->
-                        validUserCount.Count <- validUserCount.Count + 1
-                        let count = validUserCount.Count
-                        collection.Update(validUserCount) |> ignore
+                    let activityRole =
+                        options.Value.ActivityRoles
+                            .OrderBy(fun r -> r.Threshold)
+                            .LastOrDefault(fun r -> r.Threshold <= count && not (user.RoleIds.Contains(r.Id)))
+                        |> Option.ofObj
 
-                        let activityrole =
-                            options.Value.ActivityRoles
-                                .OrderBy(fun r -> r.Threshold)
-                                .FirstOrDefault(fun r -> r.Threshold <= count && not (user.RoleIds.Contains(r.Id)))
-                            |> Option.ofObj
+                    match activityRole with
+                    | None -> Task.CompletedTask
+                    | Some validActivityRole ->
+                        logger.LogInformation(
+                            "Giving role {RoleId} to user {UserId} for reaching {Count} messages",
+                            validActivityRole.Id,
+                            user.Id,
+                            count
+                        )
 
-                        match activityrole with
-                        | None -> Task.CompletedTask
-                        | Some validActivityRole ->
-                            logger.LogInformation(
-                                "Giving role {RoleId} to user {UserId} for reaching {Count} messages",
-                                validActivityRole.Id,
-                                user.Id,
-                                count
-                            )
-
-                            user.AddRoleAsync(validActivityRole.Id)
+                        user.AddRoleAsync(validActivityRole.Id)
                 | _ -> Task.CompletedTask)
     )
 |> ignore

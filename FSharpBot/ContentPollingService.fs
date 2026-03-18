@@ -540,7 +540,7 @@ type ContentUpdater(logger: ILogger, config: ContentPollingConfiguration, databa
                             logger.LogInformation(
                                 "Added update {UpdateId} to existing thread {ThreadId}",
                                 update.Id,
-                                topic.TopicKey
+                                topic.ThreadId
                             )
 
                         | Some _ -> logger.LogInformation("Update {UpdateId} already exists in thread", update.Id)
